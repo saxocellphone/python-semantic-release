@@ -2,6 +2,7 @@
 """
 import logging
 import os
+from semantic_release.helpers import get_release_cycle_abbr
 import sys
 
 import click
@@ -14,6 +15,7 @@ from .changelog import markdown_changelog
 from .dist import build_dists, remove_dists, should_build, should_remove_dist
 from .history import (
     evaluate_version_bump,
+    get_current_prerelease_num,
     get_current_version,
     get_new_version,
     get_previous_version,
@@ -34,8 +36,10 @@ from .vcs_helpers import (
     checkout,
     commit_new_version,
     get_current_head_hash,
+    get_previous_prerelease_num,
     get_repository_owner_and_name,
     push_new_version,
+    tag_new_prerelease,
     tag_new_version,
     update_changelog_file,
 )
@@ -188,6 +192,25 @@ def bump_version(new_version, level_bump):
     logger.info(f"Bumping with a {level_bump} version to {new_version}")
 
 
+def bump_prerelease_num(version, release_cycle, N):
+    abbr = get_release_cycle_abbr(release_cycle)
+    version_str = version + f"-{abbr}{N}"
+    set_new_version(version_str)
+    if config.get(
+        "commit_version_number",
+        config.get("version_source") == "commit",
+    ):
+        commit_new_version(version_str)
+
+    if config.get("version_source") == "tag" or config.get("tag_commit"):
+        tag_new_prerelease(version, release_cycle, N)
+
+    if N == 0:
+        logger.info(f"Creating release cycle {release_cycle}. Initializing pre-release num to {N}")
+    else:
+        logger.info(f"Bumping release cycle {version}-{release_cycle} to {N}")
+
+
 def changelog(*, unreleased=False, noop=False, post=False, **kwargs):
     """
     Generate the changelog since the last release.
@@ -233,6 +256,7 @@ def publish(**kwargs):
     current_version = get_current_version()
 
     retry = kwargs.get("retry")
+    release_cycle = kwargs.get("release_cycle")
     if retry:
         logger.info("Retry is on")
         # The "new" version will actually be the current version, and the
@@ -240,17 +264,41 @@ def publish(**kwargs):
         level_bump = None
         new_version = current_version
         current_version = get_previous_version(current_version)
+        new_prerelease_num = get_previous_prerelease_num(current_version, release_cycle)
     else:
         # Calculate the new version
         level_bump = evaluate_version_bump(current_version, kwargs.get("force_level"))
         new_version = get_new_version(current_version, level_bump)
+        if release_cycle != "final":
+            new_prerelease_num = get_current_prerelease_num(current_version, release_cycle)
 
     owner, name = get_repository_owner_and_name()
+    is_final_release = False
+    if release_cycle == "alpha":
+        branch = config.get("alpha_branch")
+    elif release_cycle == "beta":
+        branch = config.get("beta_branch")
+    elif release_cycle == "rc":
+        branch = config.get("rc_branch")
+    else:
+        is_final_release = True
+        branch = config.get("branch")
+        ci_checks.check(branch)
 
-    branch = config.get("branch")
     logger.debug(f"Running publish on branch {branch}")
-    ci_checks.check(branch)
     checkout(branch)
+
+    if not is_final_release:
+        bump_prerelease_num(current_version, release_cycle, new_prerelease_num)
+        logger.info("Pushing new version")
+        push_new_version(
+            auth_token=get_token(),
+            owner=owner,
+            name=name,
+            branch=branch,
+            domain=get_domain(),
+        )
+        return
 
     if should_bump_version(
         current_version=current_version,
@@ -280,6 +328,7 @@ def publish(**kwargs):
             branch=branch,
             domain=get_domain(),
         )
+
 
         # Get config options for uploads
         dist_path = config.get("dist_path")
@@ -391,6 +440,10 @@ def main(**kwargs):
 
 
 @main.command(name="publish", help=publish.__doc__)
+@click.option('--alpha', 'release_cycle', flag_value='alpha')
+@click.option('--beta', 'release_cycle', flag_value='beta')
+@click.option('--rc', 'release_cycle', flag_value='rc')
+@click.option('--final', 'release_cycle', flag_value='final', default=True)
 @common_options
 def cmd_publish(**kwargs):
     try:

@@ -14,7 +14,7 @@ from dotty_dict import Dotty
 from ..errors import ImproperConfigurationError
 from ..helpers import LoggedFunction
 from ..settings import config
-from ..vcs_helpers import get_commit_log, get_formatted_tag, get_last_version
+from ..vcs_helpers import get_commit_log, get_formatted_tag, get_previous_prerelease_num, get_last_version
 from .logs import evaluate_version_bump  # noqa
 
 from .parser_angular import parse_commit_message as angular_parser  # noqa isort:skip
@@ -225,6 +225,13 @@ def get_current_version() -> str:
     if config.get("version_source") == "tag":
         return get_current_version_by_tag()
     return get_current_version_by_config_file()
+
+
+def get_current_prerelease_num(version: str, release_cycle: str) -> int:
+    last_num = get_previous_prerelease_num(version, release_cycle)
+    if isinstance(last_num, int):
+        return last_num + 1
+    return 0
 
 
 @LoggedFunction(logger)

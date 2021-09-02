@@ -39,6 +39,18 @@ def build_requests_session(
     return session
 
 
+def get_release_cycle_abbr(release_cycle: str) -> str:
+    if release_cycle == "alpha":
+        release_cycle_abbr = "a"
+    elif release_cycle == "beta":
+        release_cycle_abbr = "b"
+    elif release_cycle == "rc":
+        release_cycle_abbr = "rc"
+    else:
+        raise ValueError(f"Release cycle {release_cycle} is not valid. Has to be alpha, beta, or rc.")
+    return release_cycle_abbr
+
+
 class LoggedFunction:
     """
     Decorator which adds debug logging to a function.

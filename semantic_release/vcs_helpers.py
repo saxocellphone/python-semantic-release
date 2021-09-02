@@ -13,7 +13,7 @@ from git import GitCommandError, InvalidGitRepositoryError, Repo, TagObject
 from git.exc import BadName
 
 from .errors import GitError, HvcsRepoParseError
-from .helpers import LoggedFunction
+from .helpers import LoggedFunction, get_release_cycle_abbr
 from .settings import config
 
 try:
@@ -40,6 +40,31 @@ def get_formatted_tag(version):
     """Get the version, formatted with `tag_format` config option"""
     tag_format = config.get("tag_format")
     return tag_format.format(version=version)
+
+
+def get_pre_release_formatted_tag(version, release_cycle, N):
+    """
+    Similar to get_formatted_tag(), but with pre-release suffixes
+
+    Default: vX.x.x-{release_cycle_abbreviatio}{N}
+    Exmaple: v1.2.3-b2
+
+    :return: A string with pre release suffixes
+    """
+    if release_cycle == "final":
+        # Shouldn't be here, since final release doesn't
+        # need suffixes.
+        return get_formatted_tag(version)
+
+    tag_format = config.get("tag_format")
+    pre_release_tag_format = tag_format + "-{release_cycle_abbr}{N}"
+    release_cycle_abbr = get_release_cycle_abbr(release_cycle)
+
+    return pre_release_tag_format.format(
+            version=version,
+            release_cycle_abbr=release_cycle_abbr,
+            N=N
+            )
 
 
 @check_repo
@@ -79,6 +104,28 @@ def get_last_version(skip_tags=None) -> Optional[str]:
         match = re.search(r"\d+\.\d+\.\d+", i.name)
         if match and i.name not in skip_tags:
             return match.group(0)  # Return only numeric vesion like 1.2.3
+
+    return None
+
+
+@check_repo
+@LoggedFunction(logger)
+def get_previous_prerelease_num(version: str, release_cycle: str) -> Optional[int]:
+    """
+    Find the latest release cycle number given a version
+
+    :return: A string containing a version number.
+    """
+    def version_finder(tag):
+        if isinstance(tag.commit, TagObject):
+            return tag.tag.tagged_date
+        return tag.commit.committed_date
+
+    for i in sorted(repo.tags, reverse=False, key=version_finder):
+        abbr = get_release_cycle_abbr(release_cycle)
+        match = re.search(rf"{version}-{abbr}(\d+)", i.name)
+        if match and i.name:
+            return int(match.group(1))
 
     return None
 
@@ -208,6 +255,20 @@ def tag_new_version(version: str):
     :param version: The version number used in the tag as a string.
     """
     tag = get_formatted_tag(version)
+    return repo.git.tag("-a", tag, m=tag)
+
+
+@check_repo
+@LoggedFunction(logger)
+def tag_new_prerelease(version: str, release_cycle: str, N: int):
+    """
+    Create a new tag with the version number along with prerelease suffix
+
+    :param version: The version number used in the tag as a string.
+    :param release_cycle: The release cycle, either alpha, beta or rc
+    :N: The pre-release number
+    """
+    tag = get_pre_release_formatted_tag(version, release_cycle, N)
     return repo.git.tag("-a", tag, m=tag)
 
 
