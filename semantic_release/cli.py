@@ -237,6 +237,7 @@ def changelog(*, unreleased=False, noop=False, post=False, **kwargs):
     # print is used to keep the changelog on stdout, separate from log messages
     print(markdown_changelog(owner, name, current_version, log, header=False))
 
+
     # Post changelog to HVCS if enabled
     if not noop and post:
         if check_token():
